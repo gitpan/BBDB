@@ -7,7 +7,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.33';
+$VERSION = '1.34';
 
 $BBDB::debug = 0;
 
@@ -59,7 +59,7 @@ my $single_phone_pat = <<END;
 \\ (
     (?:$quoted_string_pat)       # An international number is quoted
    |                             # BUT
-    ([\\d\\ ]+)                  # An american number is a list of integers
+    ([(\\d|nil\\ ]+)                  # An american number is a list of integers
     (?:nil)?                     # Maybe followed by nil
   )
 \\]
@@ -84,7 +84,7 @@ my $single_address_pat = <<END;
  $quoted_string_pat \\             # The city
  $quoted_string_pat \\             # The state
  $quoted_string_pat \\             # The zip code
- $quoted_string_pat                # The country
+ $nil_or_string_pat                # The country
 \\]                                # The closing ]
 END
 
@@ -371,7 +371,8 @@ sub encode {
       foreach $j (@{$i->[1]}) {
 	push @streets, quoted_stringify($j);
       }
-      my @fields = map {quoted_stringify($_)} @$i[0,2,3,4,5];
+      my @fields = map {quoted_stringify($_)} @$i[0,2,3,4];
+      push @fields, nil_or_string(@$i[5]);
       splice(@fields,1,0,"(@streets)");
       $fields[1] = 'nil' unless @streets;
       push @address, "[@fields]";
