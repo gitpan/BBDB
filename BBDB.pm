@@ -7,7 +7,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.00';
+$VERSION = '1.2';
 
 $BBDB::debug = 0;
 
@@ -42,9 +42,12 @@ my $nil_or_string_pat = <<END;
 END
 
 my $aka_pat = <<END;
-(?:
-  nil |
-  \\( $quoted_string_pat  \\)
+(?:nil|                          # Might be nil
+\\(                              # Starts with an open (
+ (?:
+  $quoted_string_pat             # And a quoted string
+  (?:\\ | \\) )?                 # followed by a space or )
+ )+                              # at least one
 )
 END
 
@@ -125,13 +128,13 @@ my $bbdb_entry_pat = <<END;
 \\[                              # Opening vector [
 $nil_or_string_pat   \\          # First name
 $nil_or_string_pat   \\          # Last name
-$aka_pat   \\                    # Also Known As
+($aka_pat) \\                    # Also Known As
 $nil_or_string_pat   \\          # Company name
 ($phone_pat) \\                  # Phone list
 ($address_pat) \\                # Address list
 ($net_pat)   \\                  # Net names list
 ($notes_pat) \\                  # Notes Alist
-nil                              # Always nil as far as I can tell
+(?:nil\\ *)+                     # Always nil as far as I can tell
 \\]                              # Closing vector ]
 END
 
@@ -208,6 +211,8 @@ sub decode {
     }
     return undef;
   }
+
+
   my $i;
   local($_);
 
@@ -216,6 +221,14 @@ sub decode {
       if (!defined $fields[$field_index{$i}] or 
 	  $fields[$field_index{$i}] eq 'nil');
   }
+
+  my @aka = split(/$quoted_string_pat/ox,$fields[$field_index{aka}]);
+  #    print "AKA=\n<",join(">\n<",@aka),">\nEND AKA\n";
+  my $aka = [];
+  for ($i=0; $i < @aka - 1; $i+=2) {
+    push @$aka, un_escape($aka[$i+1]);
+  }
+
   my @phone = split(/$single_phone_pat/ox,$fields[$field_index{phone}]);
   #    print "PHONE=\n<",join(">\n<",@phone),">\nEND PHONE\n";
   my $phone = [];
@@ -270,7 +283,7 @@ sub decode {
   $self->{'data'} =  [
 	  un_escape($fields[$field_index{first}]),
 	  un_escape($fields[$field_index{last}]),
-	  un_escape($fields[$field_index{aka}]),
+	  $aka,
 	  un_escape($fields[$field_index{company}]),
 	  $phone,
 	  $address,
@@ -307,8 +320,19 @@ sub encode {
   my ($i,@result,$s);
   push @result,nil_or_string($first);
   push @result,nil_or_string($last);
-  push @result,nil_or_list($aka);
+
+  if (@$aka) {
+    my @aka;
+    foreach $i (@$aka) {
+      push @aka, quoted_stringify($i);
+    }
+    push @result, "(@aka)";
+  } else {
+    push @result, 'nil';
+  }
+
   push @result,nil_or_string($company);
+
   if (@$phone) {
     my @phone;
     foreach $i (@$phone) {
@@ -423,7 +447,7 @@ sub simple {
       if ($bbdb->decode($_)) {
 	push @results,$bbdb;
       } else {
-	print "No match at record $count in $file\nData = $_\n";
+	print STDERR "No match at record $count in $file\nData = $_\n";
       }
     }
     close INFILE;
@@ -436,7 +460,7 @@ sub simple {
       @notes{note_names($rec)} = 1;
     }
     local($_);
-    @notes = grep !/creation-date|timestamp|notes/, keys %notes;
+    @notes = grep !/^(creation-date|timestamp|notes)$/, keys %notes;
     print OUTFILE ";;; file-version: 3\n";
     print OUTFILE ";;; user-fields: ";
     print OUTFILE "(",join(' ',@notes),")" if @notes;
@@ -447,7 +471,6 @@ sub simple {
     close OUTFILE;
   }
 }
-
 
 1;
 
