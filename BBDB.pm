@@ -7,7 +7,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.34';
+$VERSION = '1.35';
 
 $BBDB::debug = 0;
 
@@ -181,6 +181,7 @@ _figure_out_indices();
 sub un_escape {
   my $s = shift;
   $s =~ s/\\n/\n/g;
+  $s =~ s/\\([0-3][0-7]{2})/sprintf("%c", oct($1))/eg;  # umlauts etc.
   $s =~ s/\\(.)/$1/g;               # should just be " or \  "emacs
   return $s;
 }
@@ -310,6 +311,7 @@ sub decode {
 sub quoted_stringify {               # escape \ and " in a string"
   my $s = shift;                     # and return it surrounded by
   $s =~ s/(\\|")/\\$1/g;             # quotes
+  $s =~ s/([\200-\377])/sprintf("\\%o",ord($1))/eg; # fix umlauts
   $s =~ s/\n/\\n/g;                  # put back newlines
   return "\"$s\"";
 }
