@@ -7,7 +7,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.31';
+$VERSION = '1.33';
 
 $BBDB::debug = 0;
 
@@ -60,6 +60,7 @@ my $single_phone_pat = <<END;
     (?:$quoted_string_pat)       # An international number is quoted
    |                             # BUT
     ([\\d\\ ]+)                  # An american number is a list of integers
+    (?:nil)?                     # Maybe followed by nil
   )
 \\]
 END
@@ -314,7 +315,7 @@ sub quoted_stringify {               # escape \ and " in a string"
 }
 
 sub nil_or_string {                  # return nil if empty string
-  return 'nil' if $_[0] eq '';       # otherwise quote it
+  return 'nil' if !defined $_[0] or $_[0] eq '';       # otherwise quote it
   return quoted_stringify(@_);
 }
 
@@ -333,7 +334,7 @@ sub encode {
   push @result,nil_or_string($first);
   push @result,nil_or_string($last);
 
-  if (@$aka) {
+  if (ref($aka) and @$aka) {
     my @aka;
     foreach $i (@$aka) {
       push @aka, quoted_stringify($i);
@@ -345,7 +346,7 @@ sub encode {
 
   push @result,nil_or_string($company);
 
-  if (@$phone) {
+  if (ref($phone) and @$phone) {
     my @phone;
     foreach $i (@$phone) {
       my $number;
@@ -361,7 +362,7 @@ sub encode {
   } else {
     push @result, 'nil';
   }
-  if (@$address) {
+  if (ref($address) and @$address) {
     my @address;
     foreach $i (@$address) {
       local($_);
@@ -380,7 +381,7 @@ sub encode {
     push @result, 'nil';
   }
 
-  if (@$net) {
+  if (ref($net) and @$net) {
     my @net;
     foreach $i (@$net) {
       push @net, quoted_stringify($i);
@@ -432,7 +433,7 @@ sub part {
 sub note_names {
   my $self = shift;
   my $notes = $self->part('notes');
-  return () unless @$notes;
+  return () unless ref($notes) and @$notes;
   local ($_);
   my @fields = map { $_->[0] } @$notes;
   return @fields;
@@ -480,7 +481,6 @@ sub simple {
 }
 
 1;
-
 
 =head1 NAME
 

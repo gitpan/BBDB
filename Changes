@@ -7,3 +7,6 @@ Revision history for Perl extension bbdb.
 1.20   Fri Feb 25, 2000 Fixed AKA bug per Colin J. Wynne
 1.30   Fri Jun  8, 2001 Updated to handle BBDB version 2.32 data
 1.31   Fri Jun  8, 2001 Packaged as a distribution
+1.32   Mon Sep 17, 2001 Allowed for nil at end of phone field
+1.33   Added patches sent by John Borwick to fix 'not defined' 
+       errors and correct running under -w
