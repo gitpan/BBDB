@@ -6,3 +6,4 @@ Revision history for Perl extension bbdb.
         - Changed grep in simple to add anchors - match whole word
 1.20   Fri Feb 25, 2000 Fixed AKA bug per Colin J. Wynne
 1.30   Fri Jun  8, 2001 Updated to handle BBDB version 2.32 data
+1.31   Fri Jun  8, 2001 Packaged as a distribution

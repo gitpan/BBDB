@@ -7,7 +7,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.30';
+$VERSION = '1.31';
 
 $BBDB::debug = 0;
 
