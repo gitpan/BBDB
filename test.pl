@@ -32,4 +32,3 @@ for ($i=0; $i<2; $i++) {
   print "not " unless $a->encode() eq $b->encode();
   printf "ok %d\n",5+$i;
 }
-

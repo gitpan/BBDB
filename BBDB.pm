@@ -7,7 +7,7 @@ require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.20';
+$VERSION = '1.30';
 
 $BBDB::debug = 0;
 
@@ -15,7 +15,7 @@ my $quoted_string_pat =<<'END';
 "                      # First a quote
 ([^\"\\]*              # Doesn't contain a \ or "
  (?:
-   \\.[^\"\\]*         # A backslash an any char and not another
+   \\.[^\"\\]*         # A backslash and any char and not another
                        # backslash or quote
  )*                    # as many of these as we like
 )
@@ -41,7 +41,7 @@ my $nil_or_string_pat = <<END;
 (?:nil|$quoted_string_pat)
 END
 
-my $aka_pat = <<END;
+my $list_of_strings = <<END;
 (?:nil|                          # Might be nil
 \\(                              # Starts with an open (
  (?:
@@ -50,6 +50,8 @@ my $aka_pat = <<END;
  )+                              # at least one
 )
 END
+
+my $aka_pat = $list_of_strings;
 
 my $single_phone_pat = <<END;
 \\[
@@ -72,15 +74,16 @@ my $phone_pat = <<END;
 )
 END
 
+my $street_pat = $list_of_strings;
+
 my $single_address_pat = <<END;
 \\[                                # The opening [
- $quoted_string_pat \\             # The six address fields
- $quoted_string_pat \\             # The six address fields
- $quoted_string_pat \\             # The six address fields
- $quoted_string_pat \\             # The six address fields
- $quoted_string_pat \\             # The six address fields
- $quoted_string_pat \\             # The six address fields
- ($int_or_list)                    # followed by the zip code
+ $quoted_string_pat \\             # The address location
+ ($street_pat) \\                    # The street list
+ $quoted_string_pat \\             # The city
+ $quoted_string_pat \\             # The state
+ $quoted_string_pat \\             # The zip code
+ $quoted_string_pat                # The country
 \\]                                # The closing ]
 END
 
@@ -155,7 +158,7 @@ my %field_names;
 @field_names{@field_names} = (0..$#field_names);
 
 my $sample_data = <<END;
-["first" "last" ("aka") "company" (["phone with integer" 123 456 789] ["phone with quotes" "123-456-789"]) (["address" "street1" "street2" "street3" "city" "state" ("zip")]) ("net") ((notes . "data")) nil]
+["first" "last" ("aka") "company" (["phone with integer" 123 456 789] ["phone with quotes" "123-456-789"]) (["address" ("street1" "street2" "street3") "city" "state" "zip" "country"] ["address2" ("street1" "street2" "street3") "city" "state" "12345" "country"]) ("net") ((notes . "data")) nil]
 END
 
 my %field_index;
@@ -172,11 +175,12 @@ sub _figure_out_indices {
 }
 _figure_out_indices();
 
-########################################################################
 
+########################################################################
 sub un_escape {
   my $s = shift;
-  $s =~ s/\\(.)/$1/g;               # should just be " or \
+  $s =~ s/\\n/\n/g;
+  $s =~ s/\\(.)/$1/g;               # should just be " or \  "emacs
   return $s;
 }
 
@@ -232,33 +236,40 @@ sub decode {
   my @phone = split(/$single_phone_pat/ox,$fields[$field_index{phone}]);
   #    print "PHONE=\n<",join(">\n<",@phone),">\nEND PHONE\n";
   my $phone = [];
-    for ($i=0; $i < @phone - 1; $i+=5) {
-      push @$phone,[
-		    un_escape($phone[$i+1]),
-		     un_escape(defined $phone[$i+3] ? 
-			       $phone[$i+3] : $phone[$i+4])
-		   ];
+  for ($i=0; $i < @phone - 1; $i+=5) {
+    my $numbers;
+    if ($phone[$i+4]) {		# just digits and white space
+      $numbers = [];
+      @$numbers = split(/ /,$phone[$i+4]);
+      unshift(@$numbers, 0) if @$numbers == 2;
+      push(@$numbers, (0,0,0));
+      splice(@$numbers, 4);     # area code and ext might be 0
+    } else {
+      $numbers = un_escape($phone[$i+3]);
     }
+    push @$phone,[
+		  un_escape($phone[$i+1]),
+		  $numbers
+		 ];
+  }
 
   my @address = split(/$single_address_pat/ox,$fields[$field_index{address}]);
   #    print "ADDRESS=\n<",join(">\n<",@address),">\nEND ADDRESS\n";
   my $address = [];
-    for ($i=0; $i < @address - 1; $i+=9) {
-      my $zip = $address[$i+7];
-      $zip =~ s/^\((.*)\)$/$1/;   # remove ()
-      if (defined $address[$i+8]) {  # we have quoted strings
-	my @zip = split(/$quoted_string_pat/ox,$zip);
-	#   print "ZIP = \n<",join(">\n<",@zip),">\nEND ZIP\n";
-	$zip = join('',@zip);
+    for ($i=0; $i < @address - 1; $i+=8) {
+      my @streets = split(/$quoted_string_pat/ox,$address[$i+2]);
+      my $streets = [];
+      my $j;
+      for ($j=0; $j < @streets - 1; $j+=2) {
+	push @$streets, un_escape($streets[$j+1]);
       }
       push @$address,[
 		      un_escape($address[$i+1]),
-		      un_escape($address[$i+2]),
-		      un_escape($address[$i+3]),
+		      $streets,
 		      un_escape($address[$i+4]),
 		      un_escape($address[$i+5]),
 		      un_escape($address[$i+6]),
-		      $zip
+		      un_escape($address[$i+7]),
 		     ];
     }
 
@@ -295,9 +306,10 @@ sub decode {
 
 ########################################################################
 
-sub quoted_stringify {               # escape \ and " in a string
+sub quoted_stringify {               # escape \ and " in a string"
   my $s = shift;                     # and return it surrounded by
   $s =~ s/(\\|")/\\$1/g;             # quotes
+  $s =~ s/\n/\\n/g;                  # put back newlines
   return "\"$s\"";
 }
 
@@ -337,9 +349,8 @@ sub encode {
     my @phone;
     foreach $i (@$phone) {
       my $number;
-      if ( $i->[1] =~ m/^\D?(\d{3})\D(\d{3})\D+(\d{4})\D?(\d*)$/ ) {
-	$number = "$1 $2 $3 ";
-	$number .= $4 ? $4 : '0';
+      if ( ref($i->[1]) ) {
+	$number = join(' ',@{$i->[1]});
       } else {
 	$number = quoted_stringify($i->[1]);
       }
@@ -353,20 +364,16 @@ sub encode {
   if (@$address) {
     my @address;
     foreach $i (@$address) {
-      my $zip = $i->[6];
-      if ($zip =~ m/^(\d{5})\D?(\d{4})?$/) {
-	$zip = $1;
-	if ($2) {
-	  $zip = "($zip $2)";
-	}
-      } elsif ($zip =~ m/^(\S+) (\S+)$/) {
-	$zip = "(\"$1\" \"$2\")";
-      } else {
-	$zip = quoted_stringify($zip);
-      }
       local($_);
-      my @fields = map {quoted_stringify($_)} @$i[0..5];
-      push @address, "[@fields $zip]";
+      my $j;
+      my @streets;
+      foreach $j (@{$i->[1]}) {
+	push @streets, quoted_stringify($j);
+      }
+      my @fields = map {quoted_stringify($_)} @$i[0,2,3,4,5];
+      splice(@fields,1,0,"(@streets)");
+      $fields[1] = 'nil' unless @streets;
+      push @address, "[@fields]";
     }
     push @result, "(@address)";
   } else {
@@ -434,12 +441,12 @@ sub note_names {
 sub simple {
   my ($file,$bbdb) = @_;
   local ($_);
-  if (@_ == 1) {		#we're reading
+  if (@_ == 1) {		#we're reading'
     open(INFILE,$file) or die $!;
-    <INFILE>; <INFILE>;		# skip 2
     my $count = 0;
     my @results;
     while (<INFILE>) {
+      next if m/^;/; # skip comments
       $count++;
       chomp;
       #    print STDERR "$count ";
@@ -452,7 +459,7 @@ sub simple {
     }
     close INFILE;
     return \@results;
-  } else {                   # we're writing
+  } else {                   # we're writing'
     open(OUTFILE,">$file") or die $!;
     my $rec;
     my ($notes,@notes,%notes);
@@ -461,7 +468,7 @@ sub simple {
     }
     local($_);
     @notes = grep !/^(creation-date|timestamp|notes)$/, keys %notes;
-    print OUTFILE ";;; file-version: 3\n";
+    print OUTFILE ";;; file-version: 6\n";
     print OUTFILE ";;; user-fields: ";
     print OUTFILE "(",join(' ',@notes),")" if @notes;
     print OUTFILE "\n";
@@ -474,7 +481,6 @@ sub simple {
 
 1;
 
-__END__
 
 =head1 NAME
 
@@ -510,14 +516,14 @@ space.  I have added comments to the right
   ["fax" 415 789 1156 0]              Phone number field - US style
   ["mazatlan" "011-5269-164195"]      Phone number field - International style
  )
- (["mailing" "PMB 141"                Address field - There are 3 fields for
-   "524 San Anselmo Ave." ""           for the street address, then one each
-   "San Anselmo" "CA" (94960 2614)"     for City, State, and Zip Code
+ (["mailing"                          The address location, then a list
+   ("PMB 141" "524 San Anselmo Ave.") for the street address, then one each
+   "San Anselmo" "CA" "94960" "USA"   for City, State, Zip Code, and country
   ]
-  ["mazatlan" "Reino de Navarra #757" Address field - Note that there is no
-   "Frac. El Cid" ""                   field for Country.  That is unfortunate
-   "Mazatlan" "Sinaloa, Mexico"        The zip code field is quoted if its
-   ("CP" "82110")                      not an integer
+  ["mazatlan"                         another Address field
+   ("Reino de Navarra #757" "Frac. El Cid") The street list
+   "Mazatlan" "Sinaloa"               City State
+   "82110" "Mexico"                   Zip and country
   ]
   )
  ("nadine.and.henry@pobox.com"        The net addresses - a list of strings
@@ -535,7 +541,89 @@ object.  The internal structure of the BBDB object mimics the lisp
 structure of the BBDB string.  It consists of a reference to an array
 with 9 elements The Data::Dumper output of the above BBDB string would
 just replaces all of the ()s with []s.  It can be accessed by using
-the C<$bbdb->part('all')> method.
+the C<$bbdb->part('all')> method. For completeness, here is the output
+of Data::Dumper for the above record:
+
+ $VAR1 = bless( {
+                 'data' => [
+                             'Henry',
+                             'Laxen',
+                             [
+                               'Henry, Enrique'
+                             ],
+                             'Elegant Solutions',
+                             [
+                               [
+                                 'home',
+                                 [
+                                   '415',
+                                   '789',
+                                   '1159',
+                                   '0'
+                                 ]
+                               ],
+                               [
+                                 'fax',
+                                 [
+                                   '415',
+                                   '789',
+                                   '1156',
+                                   '0'
+                                 ]
+                               ],
+                               [
+                                 'mazatlan',
+                                 '011-5269-164195'
+                               ]
+                             ],
+                             [
+                               [
+                                 'mailing',
+                                 [
+                                   'PMB 141',
+                                   '524 San Anselmo Ave.'
+                                 ],
+                                 'San Anselmo',
+                                 'CA',
+                                 '94960',
+                                 'USA'
+                               ],
+                               [
+                                 'mazatlan',
+                                 [
+                                   'Reino de Navarra #757',
+                                   'Frac. El Cid'
+                                 ],
+                                 'Mazatlan',
+                                 'Sinaloa',
+                                 'CP-82110',
+                                 'Mexico'
+                               ]
+                             ],
+                             [
+                               'nadine.and.henry@pobox.com',
+                               'maztravel@maztravel.com'
+                             ],
+                             [
+                               [
+                                 'creation-date',
+                                 '1999-09-02'
+                               ],
+                               [
+                                 'timestamp',
+                                 '1999-10-17'
+                               ],
+                               [
+                                 'notes',
+                                 'Always split aces and eights'
+                               ],
+                               [
+                                 'birthday',
+                                 '6/15'
+                               ]
+                             ]
+                           ]
+               }, 'BBDB' );
 
 =head2 Methods
 
@@ -622,10 +710,14 @@ BBDB texinfo documentation
 
 =head1 BUGS
 
-Phone numbers and zip codes may be converted from strings to integers
-if they are decoded and encoded.  This should not affect the operation
-of BBDB.  Also a null last name is converted from "" to nil, which
-also doesn't hurt anything.
+In version 2.32 of BBDB, despite what the documentation says, it seems
+that zip codes are always stored quoted strings, even though it seems
+to be impossible to enter anything other than an integer.  
+
+Phone numbers may be converted from strings to integers if they are
+decoded and encoded.  This should not affect the operation of BBDB.
+Also a null last name is converted from "" to nil, which also doesn't
+hurt anything.
 
 You might ask why I use arrays instead of hashes to encode the data in
 the BBDB file.  The answer is that order matters in the bbdb file, and

@@ -31,8 +31,8 @@ foreach $bbdb (@$all) {
     my $address = $bbdb->part('address')->[$i];
     if ($address->[0] eq 'mailing' ) {
       printf "%s %s\n",$bbdb->part('first'),$bbdb->part('last');
-      map { printif $address->[$_] } (1..3);
-      printf "%s, %s, %s\n",@$address[4,5,6];
+      map { printif $_ } @{$address->[1]};
+      printf "%s, %s, %s\n%s\n",@$address[2..5];
     }
   }
 }
