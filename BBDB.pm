@@ -1,13 +1,28 @@
 package BBDB;
 
+=head1 NAME
+
+BBDB - Read and Write BBDB files
+
+=head1 VERSION
+
+Version 1.40
+
+=cut
+
+our $VERSION = '1.40';
+
+
 use strict;
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
+use vars qw(@ISA @EXPORT @EXPORT_OK);
 
 require Exporter;
 
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(decode encode part simple);
-$VERSION = '1.35';
+
+# Sorry, but I'm an American, change this if you're not!
+$BBDB::default_country = 'USA';   # used only for printing
 
 $BBDB::debug = 0;
 
@@ -433,6 +448,7 @@ sub part {
 
 ########################################################################
 
+# Return the name part of the notes
 sub note_names {
   my $self = shift;
   my $notes = $self->part('notes');
@@ -440,6 +456,16 @@ sub note_names {
   local ($_);
   my @fields = map { $_->[0] } @$notes;
   return @fields;
+}
+
+sub note_by_name {
+  my ($self,$key) = @_;
+  my $notes = $self->part('notes');
+  return unless ref($notes) and @$notes;
+  local ($_);
+  my @result = grep { $_->[0] eq $key } @$notes;
+  return unless @result == 1;
+  return $result[0]->[1];
 }
 
 sub simple {
@@ -483,11 +509,85 @@ sub simple {
   }
 }
 
+########################################################################
+
+sub aka_as_text {
+  my $bbdb = shift;
+  return join("\n",@{$bbdb->part('aka')});
+}
+
+sub phone_as_text {
+  my $bbdb = shift;
+  my $phones = $bbdb->part('phone');
+  my @lines;
+  foreach my $phone (@$phones) {
+    my ($where,$number) = @$phone;
+    if (ref $number) {
+      my @numbers = @$number;
+      my $last = pop @numbers;
+      if (@numbers == 3) {
+	$number = sprintf("(%s)-%s-%s",@numbers);
+      }
+      $number .= " x $last" unless $last eq '0';
+    }
+    push @lines, "$where: $number";
+  }
+  return join("\n",@lines);
+}
+
+sub address_as_text {
+  my $bbdb = shift;
+  my $addresses = $bbdb->part('address');
+  my @lines;
+  foreach my $address (@$addresses) {
+    my ($where,$streetR,$city,$state,$zip,$country) = @$address;
+    my @streets = @$streetR;
+    $country = $BBDB::default_country unless $country;
+    my $prefix = ' ' x (length($where) + 2);
+    push @lines, 
+      join("\n$prefix", 
+	   "$where: " . shift @streets,
+	   @streets,
+	   "$city, $state",
+	   "$zip $country");
+  }
+  return join("\n",@lines);
+}
+
+sub net_as_text {
+  my $bbdb = shift;
+  return join("\n",@{$bbdb->part('net')});
+}
+
+sub notes_as_text {
+  my $bbdb = shift;
+  my @notes = @{$bbdb->part('notes')};
+  my @lines;
+  foreach my $note (@notes) {
+    push @lines, join(": ",@$note);
+  }
+  return join("\n",@lines);
+}
+
+sub all_as_text {
+  my $bbdb = shift;
+  $DB::single = 1;
+  my @subs = ( \&aka_as_text, \&net_as_text, 
+	       \&phone_as_text, \&address_as_text, 
+	       \&notes_as_text);
+  my @lines;
+  push @lines, $bbdb->part('first') . ' ' . $bbdb->part('last');
+  push @lines, $bbdb->part('company') if $bbdb->part('company');
+  foreach my $sub (@subs) {
+    my $result = $bbdb->$sub;
+    push @lines, $result if $result;
+  }
+  return join("\n", @lines);
+  
+}
+
+
 1;
-
-=head1 NAME
-
-bbdb - Perl extension for reading and writing bbdb files
 
 =head1 SYNOPSIS
 
@@ -676,7 +776,7 @@ the BBDB file, and then the individual records are written out.
 Takes a string as written in a BBDB file of a single BBDB record
 and decodes it into its PERL representation.  Returns undef if
 it couldn't decode the record for some reason, otherwise returns
-true.  
+true.
 
        $bbdb->decode($entry);
 
@@ -688,6 +788,60 @@ data that BBDB understands.  There are some ambiguities, noted in
 BUGS below.
 
        my $string = $bbdb->encode();
+
+=item note_by_name('key')
+
+Returns the value associated the the specified key in the notes part.
+Returns undef if the key is not found or is not unique (which I don't
+think can happen)
+
+=head2 Printing methods
+
+The parts first, last, and company, are all stored as strings, so you
+can print them out with a simple C<< print $bbdb->part('name') >> if you like.
+The rest of the parts have an internal structure, and a method is provided
+to return them as a string, suitable for printing.  The method names are the
+same as the part names, with a C<_as_text> appended to the part name.  
+For example to print out all of the addresses for a particular BBDB object,
+just say C<< $bbdb->address_as_text >>  Just for completeness, the methods are
+named here:
+
+=item aka_as_text()
+
+=item net_as_text()
+
+=item phone_as_text()
+
+=item address_as_text()
+
+=item notes_as_text()
+
+=item all_as_text()
+
+This returns as a string the entire BBDB object using the methods
+defined above.  For example, the sample record will print out as 
+follows:
+
+ Henry Laxen
+ Elegant Solutions
+ Henry, Enrique
+ nadine.and.henry@pobox.com
+ maztravel@maztravel.com
+ home: (415)-789-1159
+ fax: (415)-789-1156
+ mazatlan: 011-5269-164195
+ mailing: PMB 141
+          524 San Anselmo Ave.
+          San Anselmo, CA
+          94960 USA
+ mazatlan: Reino de Navarra #757
+           Frac. El Cid
+           Mazatlan, Sinaloa
+           CP-82110 Mexico
+ creation-date: 1999-09-02
+ timestamp: 1999-10-17
+ notes: Always split aces and eights
+ birthday: 6/15
 
 
 =back
